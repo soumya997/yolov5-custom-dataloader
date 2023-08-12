@@ -449,7 +449,9 @@ class CustomLoadImagesAndLabels(Dataset):
                  stride=32,
                  pad=0.0,
                  min_items=0,
-                 prefix=''):
+                 prefix='',
+                 new_width=100,
+                 new_height=100):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -460,6 +462,8 @@ class CustomLoadImagesAndLabels(Dataset):
         self.stride = stride
         self.path = path
         self.albumentations = Albumentations(size=img_size) if augment else None
+        self.new_width = new_width
+        self.new_height = new_height
         
         try:
             f = []  # image files
@@ -676,6 +680,8 @@ class CustomLoadImagesAndLabels(Dataset):
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         combined_image = np.zeros((self.img_size, self.img_size, 3))
         combo_shapes = None
+
+
         if mosaic:
             # Load mosaic
             img, labels = self.load_mosaic(index)
@@ -712,8 +718,8 @@ class CustomLoadImagesAndLabels(Dataset):
             cropped_img1 = self.get_img_cropped(center_x1, center_y1, width1, height1, img1)
             
 
-            new_width = 100
-            new_height = 100
+            new_width = self.new_width
+            new_height = self.new_height
             resized_image1 = cv2.resize(cropped_img, (new_width, new_height))
             resized_image2 = cv2.resize(cropped_img1, (new_width, new_height))
 
@@ -738,8 +744,6 @@ class CustomLoadImagesAndLabels(Dataset):
             center_x = (bottom_right[0] + top_left[0]) // 2
             center_y = (bottom_right[1] + top_left[1]) // 2
 
-            # center_point = (center_x, center_y)
-
 
             bottom_right1 = (paste_x2, paste_y2)
             top_left1 = (paste_x2+new_width, paste_y2+new_height)
@@ -747,27 +751,20 @@ class CustomLoadImagesAndLabels(Dataset):
             center_x1 = (bottom_right1[0] + top_left1[0]) // 2
             center_y1 = (bottom_right1[1] + top_left1[1]) // 2
 
-            # center_point1 = (center_x1, center_y1)
-            
-            # labels = (center_x, center_y, new_width, new_height)
-            # labels1 = (center_x1, center_y1, new_width, new_height)
+
 
             labels = np.array([[labels[0][0], center_x, center_y, new_width, new_height],
                                [labels1[0][0], center_x1, center_y1, new_width, new_height]])/max_img_size
             
 
-            # print("^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-            # print(labels)
-            # print(labels[0][0])
 
             combo_shape = self.img_size  # final letterboxed shape
             combined_image, combo_ratio, combo_pad = letterbox(combined_image, combo_shape, auto=False, scaleup=self.augment)
             combo_shapes = (h01, w01), ((h1 / h01, w1 / w01), combo_pad)  # for COCO mAP rescaling
             combined_image = combined_image.astype(np.uint8) 
 
-            if labels.size:# and labels1.size:  # normalized xywh to pixel xyxy format
+            if labels.size: # normalized xywh to pixel xyxy format
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], combo_ratio[0] * w, combo_ratio[1] * h, padw=combo_pad[0], padh=combo_pad[1])
-                # labels1[:, 1:] = xywhn2xyxy(labels1[:, 1:], ratio1[0] * w1, ratio1[1] * h1, padw=pad1[0], padh=pad1[1])
 
             if self.augment:
                 # not coding for the 2nd image, make self.augment = false
@@ -780,11 +777,9 @@ class CustomLoadImagesAndLabels(Dataset):
                                                  perspective=hyp['perspective'])
 
 
-        # print("*******************************")
-        # print(combined_image)
+
         nl = len(labels)  # number of labels
-        # nl1 = len(labels1)  # number of labels
-        if nl:# and nl1:
+        if nl:
             labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=combined_image.shape[1], h=combined_image.shape[0], clip=True, eps=1E-3)
 
         if self.augment:
@@ -816,29 +811,16 @@ class CustomLoadImagesAndLabels(Dataset):
 
         
         labels_out = torch.zeros((nl, 6))
-        # labels_out1 = torch.zeros((nl1, 6))
-        if nl:# and nl1:
+        if nl:
             labels_out[:, 1:] = torch.from_numpy(labels)
-            # labels_out1[:, 1:] = torch.from_numpy(labels1)
 
         # Convert
         combined_image = combined_image.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         combined_image = np.ascontiguousarray(combined_image)
         
-        # img1 = img1.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
-        # img1 = np.ascontiguousarray(img1)
-        
-        # final_labels_out = [labels_out, labels_out1]
-        # final_images_out = [torch.from_numpy(img), torch.from_numpy(img1)]
-        # final_filename_out = [self.im_files[index], self.im_files[index1]]
-        # final_shapes_out = [shapes, shapes1]
-
-        # white_img = np.zeros_like(img) + 255
         
 
         return torch.from_numpy(combined_image), labels_out, self.im_files[index], combo_shapes
-        # return torch.from_numpy(img), labels_out, self.im_files[index], shapes
-        # return final_images_out, final_labels_out, final_filename_out, final_shapes_out, combined_image
 
     def load_image(self, i):
         # Loads 1 image from dataset index 'i', returns (im, original hw, resized hw)

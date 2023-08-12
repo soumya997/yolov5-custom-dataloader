@@ -54,6 +54,7 @@ from utils.callbacks import Callbacks
 # from utils.dataloaders import create_dataloader
 # from utils.custom_dataloaders import create_dataloader
 from utils.only_img_cus_dataloaders import create_dataloader
+# from utils.only_img_custom_aug_dataloader import create_dataloader
 from utils.downloads import attempt_download, is_url
 from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, check_file, check_git_info,
                            check_git_status, check_img_size, check_requirements, check_suffix, check_yaml, colorstr,
@@ -194,8 +195,6 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
         LOGGER.info('Using SyncBatchNorm()')
 
     # Trainloader
-    print("=--------------------------------------------------")
-    print(opt.cache)
     train_loader, dataset = create_dataloader(train_path,
                                               imgsz,
                                               batch_size // WORLD_SIZE,
@@ -211,10 +210,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                               quad=opt.quad,
                                               prefix=colorstr('train: '),
                                               shuffle=True,
-                                              seed=opt.seed)
-    print("LLLLLLLLLLLLLLLLLLLLLLLLLLLLLL")
-    print(dataset.labels.__len__())
-    print(dataset.labels[0].shape)
+                                              seed=opt.seed,
+                                              template_file = opt.template)
+
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
@@ -232,7 +230,8 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                                        rank=-1,
                                        workers=workers * 2,
                                        pad=0.5,
-                                       prefix=colorstr('val: '))[0]
+                                       prefix=colorstr('val: '),
+                                       template_file = opt.template)[0]
 
         if not resume:
             if not opt.noautoanchor:
@@ -452,6 +451,7 @@ def parse_opt(known=False):
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch-low.yaml', help='hyperparameters path')
+    parser.add_argument('--template', type=str, default=ROOT / '/home/somusan/somusan/soumyadip/interview/lens_assignment/yolov5-custom-dataloader/1_3_crop.tif', help='template, for template matching')
     parser.add_argument('--epochs', type=int, default=100, help='total training epochs')
     parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=640, help='train, val image size (pixels)')

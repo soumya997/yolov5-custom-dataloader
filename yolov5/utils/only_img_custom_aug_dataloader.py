@@ -116,7 +116,8 @@ def create_dataloader(path,
                       quad=False,
                       prefix='',
                       shuffle=False,
-                      seed=0):
+                      seed=0,
+                      template_file = ''):
     if rect and shuffle:
         LOGGER.warning('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
@@ -133,7 +134,8 @@ def create_dataloader(path,
             stride=int(stride),
             pad=pad,
             image_weights=image_weights,
-            prefix=prefix)
+            prefix=prefix,
+            template_file=template_file)
 
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()  # number of CUDA devices
@@ -1355,7 +1357,8 @@ class CustomDataset(Dataset):
                  stride=32,
                  pad=0.0,
                  min_items=0,
-                 prefix=''):
+                 prefix='',
+                 template_file=''):
         self.path = path
         self.im_files = [os.path.join(self.path, filename) for filename in os.listdir(self.path)]
         self.indices = range(len(self.im_files))
@@ -1368,9 +1371,13 @@ class CustomDataset(Dataset):
         self.augment = augment
         self.shapes = np.array([cv2.imread(img_fn).shape[:2] for img_fn in self.im_files])
         self.rect = rect
-        self.template = cv2.imread('/home/somusan/somusan/soumyadip/interview/lens_assignment/1_3_crop.tif')
         self.hyp = hyp
         self.albumentations = Albumentations(size=img_size) if augment else None
+        self.template_file = template_file
+        self.template = cv2.imread(self.template_file)
+        self.temp_ratio_h, self.temp_ratio_w = self.template.shape[0]/480, self.template.shape[1]/640
+        
+
 
         # Create indices
         n = len(self.shapes)  # number of images
@@ -1434,6 +1441,10 @@ class CustomDataset(Dataset):
         return self.ims[i], self.im_hw0[i], self.im_hw[i]  # im, hw_original, hw_resized
     
     def get_labels(self, main_image, template):
+
+        reduced_size = (int(main_image.shape[1]*self.temp_ratio_w), int(main_image.shape[0]*self.temp_ratio_h))
+        template = cv2.resize(template, reduced_size)
+
         main_gray = cv2.cvtColor(main_image, cv2.COLOR_BGR2GRAY)
         template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
 
@@ -1451,20 +1462,10 @@ class CustomDataset(Dataset):
         center_x = (bottom_right[0] + top_left[0]) // 2
         center_y = (bottom_right[1] + top_left[1]) // 2
 
-        center_point = (center_x, center_y)
 
         h = bottom_right[1] - top_left[1]
         w = bottom_right[0] - top_left[0]
         
-        H, W, C = main_image.shape
-        img_size_scale = max(H, W)
-        # row = np.array([[0.0, 
-        #                  center_x, 
-        #                  center_y, 
-        #                  w, 
-        #                  h]])
-
-        # [bottom_right, top_left]
 
         return np.array([[0.0, center_x, center_y, w, h]])
 
@@ -1488,8 +1489,11 @@ class CustomDataset(Dataset):
         # Load image
         img, (h0, w0), (h, w) = self.load_image(index)
         img1, (h01, w01), (h1, w1) = self.load_image(index1)
-        # H, W, C = img.shape
-        # max_img_size = max(H,W)
+        
+        resize_shape = max(h,w)
+        img = cv2.resize(img, (resize_shape, resize_shape))
+        img1 = cv2.resize(img1, (resize_shape, resize_shape))
+
 
         # Letterbox
         shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
@@ -1567,15 +1571,24 @@ class CustomDataset(Dataset):
                             [labels1[0][0], center_x1, center_y1, new_width, new_height]])/max_img_size
         
         
-        combo_shape = self.img_size  # final letterboxed shape
-        combined_image, combo_ratio, combo_pad = letterbox(combined_image, combo_shape, auto=False, scaleup=self.augment)
-        combo_shapes = (h01, w01), ((h1 / h01, w1 / w01), combo_pad)  # for COCO mAP rescaling
-        combined_image = combined_image.astype(np.uint8)
+        # combo_shape = self.img_size  # final letterboxed shape
+        # combined_image, combo_ratio, combo_pad = letterbox(combined_image, combo_shape, auto=False, scaleup=self.augment)
+        # combo_shapes = (h01, w01), ((h1 / h01, w1 / w01), combo_pad)  # for COCO mAP rescaling
+        # combined_image = combined_image.astype(np.uint8)
 
-        if labels_main.size:# and labels1.size:  # normalized xywh to pixel xyxy format
-            labels_main[:, 1:] = xywhn2xyxy(labels_main[:, 1:], combo_ratio[0] * w, combo_ratio[1] * h, padw=combo_pad[0], padh=combo_pad[1])
-            # labels1[:, 1:] = xywhn2xyxy(labels1[:, 1:], ratio1[0] * w1, ratio1[1] * h1, padw=pad1[0], padh=pad1[1])
-            # print(labels_main)
+        combo_shape = max(combined_image.shape)#self.img_size  # final letterboxed shape
+        combined_image, combo_ratio, combo_pad = letterbox(combined_image, combo_shape, auto=False, scaleup=self.augment)
+        combo_h, combo_w, _ = combined_image.shape
+        combo_shapes = (combo_h, combo_w), ((combo_h / combo_h, combo_w / combo_w), combo_pad)  # for COCO mAP rescaling
+        combined_image = combined_image.astype(np.uint8) 
+        
+
+        if labels_main.size: # normalized xywh to pixel xyxy format
+            labels_main[:, 1:] = xywhn2xyxy(labels_main[:, 1:], combo_ratio[0] * combo_w, 
+                                            combo_ratio[1] * combo_h, padw=combo_pad[0], padh=combo_pad[1])
+
+        
+        
         
         if self.augment:
             combined_image, labels_main = random_perspective(combined_image,

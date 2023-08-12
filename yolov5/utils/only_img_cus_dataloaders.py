@@ -116,7 +116,8 @@ def create_dataloader(path,
                       quad=False,
                       prefix='',
                       shuffle=False,
-                      seed=0):
+                      seed=0,
+                      template_file = ''):
     if rect and shuffle:
         LOGGER.warning('WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False')
         shuffle = False
@@ -133,7 +134,8 @@ def create_dataloader(path,
             stride=int(stride),
             pad=pad,
             image_weights=image_weights,
-            prefix=prefix)
+            prefix=prefix,
+            template_file=template_file)
 
     batch_size = min(batch_size, len(dataset))
     nd = torch.cuda.device_count()  # number of CUDA devices
@@ -1354,7 +1356,8 @@ class CustomDataset(Dataset):
                  stride=32,
                  pad=0.0,
                  min_items=0,
-                 prefix=''):
+                 prefix='',
+                 template_file=''):
         self.path = path
         self.im_files = [os.path.join(self.path, filename) for filename in os.listdir(self.path)]
         self.indices = range(len(self.im_files))
@@ -1367,8 +1370,18 @@ class CustomDataset(Dataset):
         self.augment = augment
         self.shapes = np.array([cv2.imread(img_fn).shape[:2] for img_fn in self.im_files])
         self.rect = rect
-        self.template = cv2.imread('/home/somusan/somusan/soumyadip/interview/lens_assignment/1_3_crop.tif')
+        self.template_file = template_file
+        self.template = cv2.imread(self.template_file)
+        self.temp_ratio_h, self.temp_ratio_w = self.template.shape[0]/480, self.template.shape[1]/640
+        # if isinstance(img_size, list):
+        #     reduced_size = (int(img_size.shape[1]*self.temp_ratio_w), int(img_size.shape[0]*self.temp_ratio_h))
+        #     self.template = cv2.resize(self.template, reduced_size)
+        # if isinstance(img_size, int):
+        #     reduced_size = (int(img_size*self.temp_ratio_w), int(img_size*self.temp_ratio_h))
+        #     self.template = cv2.resize(self.template, reduced_size)
+
         
+
         # Create indices
         n = len(self.shapes)  # number of images
         bi = np.floor(np.arange(n) / batch_size).astype(int)  # batch index
@@ -1431,6 +1444,12 @@ class CustomDataset(Dataset):
         return self.ims[i], self.im_hw0[i], self.im_hw[i]  # im, hw_original, hw_resized
     
     def get_labels(self, main_image, template):
+
+        reduced_size = (int(main_image.shape[1]*self.temp_ratio_w), int(main_image.shape[0]*self.temp_ratio_h))
+        template = cv2.resize(template, reduced_size)
+
+
+
         main_gray = cv2.cvtColor(main_image, cv2.COLOR_BGR2GRAY)
         template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
 
@@ -1448,20 +1467,8 @@ class CustomDataset(Dataset):
         center_x = (bottom_right[0] + top_left[0]) // 2
         center_y = (bottom_right[1] + top_left[1]) // 2
 
-        center_point = (center_x, center_y)
-
         h = bottom_right[1] - top_left[1]
         w = bottom_right[0] - top_left[0]
-        
-        H, W, C = main_image.shape
-        img_size_scale = max(H, W)
-        # row = np.array([[0.0, 
-        #                  center_x, 
-        #                  center_y, 
-        #                  w, 
-        #                  h]])
-
-        # [bottom_right, top_left]
 
         return np.array([[0.0, center_x, center_y, w, h]])
 
@@ -1477,6 +1484,7 @@ class CustomDataset(Dataset):
         index = self.indices[index]  # linear, shuffled, or image_weights
         index1 = self.indices[rand_idx]  # linear, shuffled, or image_weights
         
+        
 
         combined_image = np.zeros((self.img_size, self.img_size, 3))
         combo_shapes = None
@@ -1484,8 +1492,12 @@ class CustomDataset(Dataset):
         # Load image
         img, (h0, w0), (h, w) = self.load_image(index)
         img1, (h01, w01), (h1, w1) = self.load_image(index1)
-        # H, W, C = img.shape
-        # max_img_size = max(H,W)
+        
+        
+        resize_shape = max(h,w)
+
+        img = cv2.resize(img, (resize_shape, resize_shape))
+        img1 = cv2.resize(img1, (resize_shape, resize_shape))
 
         # Letterbox
         shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
@@ -1496,20 +1508,15 @@ class CustomDataset(Dataset):
         shape1 = self.batch_shapes[self.batch[index1]] if self.rect else self.img_size  # final letterboxed shape
         img1, ratio1, pad1 = letterbox(img1, shape1, auto=False, scaleup=self.augment)
         shapes1 = (h01, w01), ((h1 / h01, w1 / w01), pad1)  # for COCO mAP rescaling
-        
 
-        # labels = self.labels[index].copy()
-        # labels1 = self.labels[index1].copy()
+        
         labels = self.get_labels(img, self.template)
         labels1 = self.get_labels(img1, self.template)
         
         
-        # print("=-----------------------")
-        # print(labels1[0][1:]*img.shape[0])
         center_x, center_y, width, height = labels[0][1:]
         center_x1, center_y1, width1, height1 = labels1[0][1:]
-        # print(center_x1, center_y1, width1, height1)
-        # print(int(center_x1), int(center_y1), int(width1), int(height1))
+        
         cropped_img = self.get_img_cropped(center_x, center_y, width, height, img)
         cropped_img1 = self.get_img_cropped(center_x1, center_y1, width1, height1, img1)
         
@@ -1518,7 +1525,7 @@ class CustomDataset(Dataset):
         new_height = 100
         resized_image1 = cv2.resize(cropped_img, (new_width, new_height))
         resized_image2 = cv2.resize(cropped_img1, (new_width, new_height))
-
+        
         ht, wd = img.shape[:2]
         max_img_size = max(ht, wd)
         combined_image = np.ones((ht, wd, 3), dtype=np.uint8) * 255
@@ -1530,16 +1537,14 @@ class CustomDataset(Dataset):
 
         combined_image[paste_y1:paste_y1+new_height, paste_x1:paste_x1+new_width] = resized_image1
         combined_image[paste_y2:paste_y2+new_height, paste_x2:paste_x2+new_width] = resized_image2
-
+        
+        # return [combined_image]
         bottom_right = (paste_x1, paste_y1)
         top_left = (paste_x1+new_width, paste_y1+new_height)
 
         center_x = (bottom_right[0] + top_left[0]) // 2
         center_y = (bottom_right[1] + top_left[1]) // 2
         
-
-        
-        # center_point = (center_x, center_y)
 
 
         bottom_right1 = (paste_x2, paste_y2)
@@ -1549,11 +1554,7 @@ class CustomDataset(Dataset):
         center_y1 = (bottom_right1[1] + top_left1[1]) // 2
 
 
-        # center_point1 = (center_x1, center_y1)
-        
-        # labels = (center_x, center_y, new_width, new_height)
-        # labels1 = (center_x1, center_y1, new_width, new_height)
-        
+
         self.labels = np.array([[labels[0][0], center_x, center_y, new_width, new_height],
                         [labels1[0][0], center_x1, center_y1, new_width, new_height]])/max_img_size
         self.labels = self.labels.tolist()
@@ -1562,18 +1563,25 @@ class CustomDataset(Dataset):
         labels_main = np.array([[labels[0][0], center_x, center_y, new_width, new_height],
                             [labels1[0][0], center_x1, center_y1, new_width, new_height]])/max_img_size
         
-        
-        combo_shape = self.img_size  # final letterboxed shape
+        # return [combined_image, labels_main]
+        combo_shape = max(combined_image.shape)#self.img_size  # final letterboxed shape
         combined_image, combo_ratio, combo_pad = letterbox(combined_image, combo_shape, auto=False, scaleup=self.augment)
-        combo_shapes = (h01, w01), ((h1 / h01, w1 / w01), combo_pad)  # for COCO mAP rescaling
+        combo_h, combo_w, _ = combined_image.shape
+        combo_shapes = (combo_h, combo_w), ((combo_h / combo_h, combo_w / combo_w), combo_pad)  # for COCO mAP rescaling
         combined_image = combined_image.astype(np.uint8) 
-
+        
+        # print(combo_h, combo_w, combo_pad, combo_shape, combo_shapes)
+        # print(combo_ratio)
+        # print(h1,w1,h01, w01)
+        # return [combined_image, labels_main]
         if labels_main.size:# and labels1.size:  # normalized xywh to pixel xyxy format
-            labels_main[:, 1:] = xywhn2xyxy(labels_main[:, 1:], combo_ratio[0] * w, combo_ratio[1] * h, padw=combo_pad[0], padh=combo_pad[1])
+            # labels_main[:, 1:] = xywhn2xyxy(labels_main[:, 1:])
+            labels_main[:, 1:] = xywhn2xyxy(labels_main[:, 1:], combo_ratio[0] * combo_w, 
+                                            combo_ratio[1] * combo_h, padw=combo_pad[0], padh=combo_pad[1])
             # labels1[:, 1:] = xywhn2xyxy(labels1[:, 1:], ratio1[0] * w1, ratio1[1] * h1, padw=pad1[0], padh=pad1[1])
             # print(labels_main)
         
-
+        
 
         # print("*******************************")
         # print(combined_image)
@@ -1583,6 +1591,7 @@ class CustomDataset(Dataset):
             labels_main[:, 1:5] = xyxy2xywhn(labels_main[:, 1:5], w=combined_image.shape[1], h=combined_image.shape[0], clip=True, eps=1E-3)
             # print(labels_main)
 
+        # return [combined_image, labels_main]
         labels_out = torch.zeros((nl, 6))
         # labels_out1 = torch.zeros((nl1, 6))
         if nl:# and nl1:
