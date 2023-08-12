@@ -1476,7 +1476,8 @@ class CustomDataset(Dataset):
         return len(self.im_files)
 
     def __getitem__(self, index):
-
+        
+        # take random images
         index_list = [i for i in range(0, len(self.im_files))]
         index_list.remove(index)
         rand_idx = random.choice(index_list)
@@ -1493,9 +1494,8 @@ class CustomDataset(Dataset):
         img, (h0, w0), (h, w) = self.load_image(index)
         img1, (h01, w01), (h1, w1) = self.load_image(index1)
         
-        
+        # resize to square size
         resize_shape = max(h,w)
-
         img = cv2.resize(img, (resize_shape, resize_shape))
         img1 = cv2.resize(img1, (resize_shape, resize_shape))
 
@@ -1504,23 +1504,23 @@ class CustomDataset(Dataset):
         img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
         shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
-
+        # Letterbox
         shape1 = self.batch_shapes[self.batch[index1]] if self.rect else self.img_size  # final letterboxed shape
         img1, ratio1, pad1 = letterbox(img1, shape1, auto=False, scaleup=self.augment)
         shapes1 = (h01, w01), ((h1 / h01, w1 / w01), pad1)  # for COCO mAP rescaling
 
-        
+        # Labels using template matching
         labels = self.get_labels(img, self.template)
         labels1 = self.get_labels(img1, self.template)
         
-        
+        # cropping finderprints
         center_x, center_y, width, height = labels[0][1:]
         center_x1, center_y1, width1, height1 = labels1[0][1:]
         
         cropped_img = self.get_img_cropped(center_x, center_y, width, height, img)
         cropped_img1 = self.get_img_cropped(center_x1, center_y1, width1, height1, img1)
         
-        # return [cropped_img, cropped_img1]
+        # resize them to a smaller size
         new_width = 100
         new_height = 100
         resized_image1 = cv2.resize(cropped_img, (new_width, new_height))
@@ -1528,6 +1528,8 @@ class CustomDataset(Dataset):
         
         ht, wd = img.shape[:2]
         max_img_size = max(ht, wd)
+
+        # paste the fingerprint to random location 
         combined_image = np.ones((ht, wd, 3), dtype=np.uint8) * 255
 
         paste_x1 = random.randint(0, wd - new_width)
@@ -1538,7 +1540,7 @@ class CustomDataset(Dataset):
         combined_image[paste_y1:paste_y1+new_height, paste_x1:paste_x1+new_width] = resized_image1
         combined_image[paste_y2:paste_y2+new_height, paste_x2:paste_x2+new_width] = resized_image2
         
-        # return [combined_image]
+        # now retrive the fingerprint bboxes from the white images
         bottom_right = (paste_x1, paste_y1)
         top_left = (paste_x1+new_width, paste_y1+new_height)
 
@@ -1546,15 +1548,13 @@ class CustomDataset(Dataset):
         center_y = (bottom_right[1] + top_left[1]) // 2
         
 
-
         bottom_right1 = (paste_x2, paste_y2)
         top_left1 = (paste_x2+new_width, paste_y2+new_height)
 
         center_x1 = (bottom_right1[0] + top_left1[0]) // 2
         center_y1 = (bottom_right1[1] + top_left1[1]) // 2
 
-
-
+        # preprocess the bbox info from above for labels variable 
         self.labels = np.array([[labels[0][0], center_x, center_y, new_width, new_height],
                         [labels1[0][0], center_x1, center_y1, new_width, new_height]])/max_img_size
         self.labels = self.labels.tolist()
@@ -1563,40 +1563,30 @@ class CustomDataset(Dataset):
         labels_main = np.array([[labels[0][0], center_x, center_y, new_width, new_height],
                             [labels1[0][0], center_x1, center_y1, new_width, new_height]])/max_img_size
         
-        # return [combined_image, labels_main]
+        # laterbox for combined image
         combo_shape = max(combined_image.shape)#self.img_size  # final letterboxed shape
         combined_image, combo_ratio, combo_pad = letterbox(combined_image, combo_shape, auto=False, scaleup=self.augment)
         combo_h, combo_w, _ = combined_image.shape
         combo_shapes = (combo_h, combo_w), ((combo_h / combo_h, combo_w / combo_w), combo_pad)  # for COCO mAP rescaling
         combined_image = combined_image.astype(np.uint8) 
         
-        # print(combo_h, combo_w, combo_pad, combo_shape, combo_shapes)
-        # print(combo_ratio)
-        # print(h1,w1,h01, w01)
-        # return [combined_image, labels_main]
-        if labels_main.size:# and labels1.size:  # normalized xywh to pixel xyxy format
-            # labels_main[:, 1:] = xywhn2xyxy(labels_main[:, 1:])
+        
+        if labels_main.size:  # normalized xywh to pixel xyxy format
             labels_main[:, 1:] = xywhn2xyxy(labels_main[:, 1:], combo_ratio[0] * combo_w, 
                                             combo_ratio[1] * combo_h, padw=combo_pad[0], padh=combo_pad[1])
-            # labels1[:, 1:] = xywhn2xyxy(labels1[:, 1:], ratio1[0] * w1, ratio1[1] * h1, padw=pad1[0], padh=pad1[1])
-            # print(labels_main)
-        
+
         
 
-        # print("*******************************")
-        # print(combined_image)
         nl = len(labels_main)  # number of labels_main
-        # nl1 = len(labels1)  # number of labels_main
-        if nl:# and nl1:
+        if nl:
             labels_main[:, 1:5] = xyxy2xywhn(labels_main[:, 1:5], w=combined_image.shape[1], h=combined_image.shape[0], clip=True, eps=1E-3)
-            # print(labels_main)
 
-        # return [combined_image, labels_main]
+
+
         labels_out = torch.zeros((nl, 6))
-        # labels_out1 = torch.zeros((nl1, 6))
-        if nl:# and nl1:
+        if nl:
             labels_out[:, 1:] = torch.from_numpy(labels_main)
-            # labels_out1[:, 1:] = torch.from_numpy(labels1)
+
 
         # Convert
         combined_image = combined_image.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
