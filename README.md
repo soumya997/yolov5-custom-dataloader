@@ -1,4 +1,9 @@
 # yolov5-custom-dataloader
+
+This is a solution for the assignment. There are 3 versions of the solution. V3 is the final solution. I gradually built up from V1 to V3. you can checkout all versions, or only V3.
+
+
+
 ### Files to Check:
 - **V1:** The code for this is provided in the `CustomLoadImagesAndLabels` class at `yolov5/utils/custom_dataloaders.py` file and demonstrated at `yolov5/custom_dataloader_w_labels.ipynb` file.
 
