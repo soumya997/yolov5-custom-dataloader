@@ -1,4 +1,10 @@
 # yolov5-custom-dataloader
+### Files to Check:
+- **V1:** The code for this is provided in the `CustomLoadImagesAndLabels` class at `utils/custom_dataloaders.py` file and demonstrated at `custom_dataloader_w_labels.ipynb` file.
+
+- **V2:** The code for this is provided in the `CustomDataset` class at `utils/only_img_cus_dataloaders.py` file, and demonstrated at `simple_custom_dataloader_wo_labels.ipynb`.
+
+- **V3:** The code for this is provided in the `CustomDataset` class at `utils/only_img_custom_aug_dataloader.py` file and its demonstrated at `custom_dataloader_aug_wo_labels.ipynb`.
 
 ### About the Repository:
 - This is the repository for the yolov5 dataloader modification.
